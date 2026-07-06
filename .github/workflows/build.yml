@@ -1,0 +1,116 @@
+name: Build and Test Demangle Utility
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [Win32, x64]
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          cmake -B build -S tools/demangle -A "${{ matrix.arch }}" -DCMAKE_BUILD_TYPE="${{ matrix.config }}" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build Library and Binaries
+        shell: bash
+        run: |
+          cmake --build build --config "${{ matrix.config }}"
+
+      - name: Run Tests
+        shell: bash
+        run: |
+          ctest --test-dir build -C "${{ matrix.config }}" --output-on-failure
+
+      - name: Package Artifacts
+        shell: pwsh
+        run: |
+          mkdir out
+          if (Test-Path "build/${{ matrix.config }}/LLVMDemangle.lib") {
+            copy "build/${{ matrix.config }}/LLVMDemangle.lib" "out/LLVMDemangle_${{ matrix.arch }}_${{ matrix.config }}.lib"
+          }
+          if ("${{ matrix.arch }}" -eq "x64" -and "${{ matrix.config }}" -eq "Release" -and (Test-Path "build/${{ matrix.config }}/demangle.exe")) {
+            copy "build/${{ matrix.config }}/demangle.exe" "out/demangle.exe"
+          }
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: demangle-${{ matrix.arch }}-${{ matrix.config }}
+          path: out/*
+
+  package:
+    name: Package Distribution
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Directory Structure
+        shell: bash
+        run: |
+          mkdir -p dist/include/llvm/Demangle
+          mkdir -p dist/include/llvm/Config
+          mkdir -p dist/lib/win32/Debug
+          mkdir -p dist/lib/win32/Release
+          mkdir -p dist/lib/x64/Debug
+          mkdir -p dist/lib/x64/Release
+          mkdir -p dist/bin
+
+      - name: Copy Headers
+        shell: bash
+        run: |
+          cp llvm/include/llvm/Demangle/*.h dist/include/llvm/Demangle/
+          cp tools/demangle/include/llvm/Config/llvm-config.h dist/include/llvm/Config/
+
+      - name: Download Win32 Debug
+        uses: actions/download-artifact@v4
+        with:
+          name: demangle-Win32-Debug
+          path: temp-Win32-Debug
+
+      - name: Download Win32 Release
+        uses: actions/download-artifact@v4
+        with:
+          name: demangle-Win32-Release
+          path: temp-Win32-Release
+
+      - name: Download x64 Debug
+        uses: actions/download-artifact@v4
+        with:
+          name: demangle-x64-Debug
+          path: temp-x64-Debug
+
+      - name: Download x64 Release
+        uses: actions/download-artifact@v4
+        with:
+          name: demangle-x64-Release
+          path: temp-x64-Release
+
+      - name: Organize Binaries
+        shell: bash
+        run: |
+          cp temp-Win32-Debug/LLVMDemangle_Win32_Debug.lib dist/lib/win32/Debug/LLVMDemangle.lib
+          cp temp-Win32-Release/LLVMDemangle_Win32_Release.lib dist/lib/win32/Release/LLVMDemangle.lib
+          cp temp-x64-Debug/LLVMDemangle_x64_Debug.lib dist/lib/x64/Debug/LLVMDemangle.lib
+          cp temp-x64-Release/LLVMDemangle_x64_Release.lib dist/lib/x64/Release/LLVMDemangle.lib
+          cp temp-x64-Release/demangle.exe dist/bin/demangle.exe
+
+      - name: Upload Consolidated Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: demangle-dist
+          path: dist/

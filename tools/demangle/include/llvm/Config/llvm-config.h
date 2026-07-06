@@ -1,0 +1,6 @@
+#ifndef LLVM_CONFIG_H
+#define LLVM_CONFIG_H
+
+/* #undef LLVM_ENABLE_LLVM_EXPORT_ANNOTATIONS */
+
+#endif
